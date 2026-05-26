@@ -13,6 +13,10 @@ RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
 WORKDIR /app
 
+# Force NODE_ENV=development pendant l'install pour inclure les devDependencies
+# (prisma CLI, tsx, typescript) nécessaires au build. Le stage runtime remet production.
+ENV NODE_ENV=development
+
 # Install des dépendances (frozen lockfile pour build reproductible)
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
