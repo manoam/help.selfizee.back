@@ -1,0 +1,171 @@
+// Schéma Prisma — help-selfizee back.
+// Reflète les tables CakePHP du CRM Konitys en PostgreSQL moderne.
+// pgvector activé via SQL manuel (cf. docker/postgres/init/02-add-embedding-column.sql).
+//
+// Auth : Keycloak (Selfizee plateformdev). Pas de table User locale —
+// l'identité utilisateur est conservée via `authorKcSub` = `sub` du JWT Keycloak.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector, unaccent, pg_trgm]
+}
+
+// ----- Catégorisation à 3 niveaux (héritée du CRM) -----
+
+model Category {
+  id          Int      @id @default(autoincrement())
+  nom         String   @db.VarChar(250)
+  slug        String   @unique
+  description String?
+  afficher    Boolean  @default(true)
+  ordre       Int      @default(0)
+  legacyId    Int?     @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subCategories SubCategory[]
+  posts         PostCategory[]
+}
+
+model SubCategory {
+  id        Int      @id @default(autoincrement())
+  nom       String   @db.VarChar(255)
+  slug      String
+  ordre     Int      @default(0)
+  legacyId  Int?     @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categoryId       Int
+  category         Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  subSubCategories SubSubCategory[]
+  posts            PostCategory[]
+
+  @@unique([categoryId, slug])
+}
+
+model SubSubCategory {
+  id        Int      @id @default(autoincrement())
+  nom       String   @db.VarChar(255)
+  slug      String
+  ordre     Int      @default(0)
+  legacyId  Int?     @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subCategoryId Int
+  subCategory   SubCategory    @relation(fields: [subCategoryId], references: [id], onDelete: Cascade)
+  posts         PostCategory[]
+
+  @@unique([subCategoryId, slug])
+}
+
+// ----- Posts -----
+
+model Post {
+  id          Int        @id @default(autoincrement())
+  titre       String
+  slug        String     @unique
+  resume      String?
+  contenu     Json
+  contenuText String?
+  status      PostStatus @default(DRAFT)
+  legacyId    Int?       @unique
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  publishedAt DateTime?
+
+  // Identité de l'auteur — capturée depuis le token Keycloak au moment de la création.
+  // Le `sub` Keycloak est stable et opaque ; `authorName` est dénormalisé pour l'affichage.
+  authorKcSub String?
+  authorName  String?
+
+  categories     PostCategory[]
+  tags           PostTag[]
+  attachments    PostAttachment[]
+  relatedTo      PostRelation[]  @relation("PostRelationFrom")
+  relatedFrom    PostRelation[]  @relation("PostRelationTo")
+
+  @@index([status])
+  @@index([publishedAt])
+  @@index([authorKcSub])
+}
+
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model PostCategory {
+  id Int @id @default(autoincrement())
+
+  postId           Int
+  post             Post            @relation(fields: [postId], references: [id], onDelete: Cascade)
+  categoryId       Int
+  category         Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  subCategoryId    Int?
+  subCategory      SubCategory?    @relation(fields: [subCategoryId], references: [id], onDelete: SetNull)
+  subSubCategoryId Int?
+  subSubCategory   SubSubCategory? @relation(fields: [subSubCategoryId], references: [id], onDelete: SetNull)
+
+  @@index([postId])
+  @@index([categoryId])
+}
+
+// ----- Tags -----
+
+model Tag {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(255)
+  slug      String   @unique
+  legacyId  Int?     @unique
+  createdAt DateTime @default(now())
+
+  posts PostTag[]
+}
+
+model PostTag {
+  postId Int
+  tagId  Int
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+}
+
+// ----- Posts liés -----
+
+model PostRelation {
+  fromId Int
+  toId   Int
+  from   Post @relation("PostRelationFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to     Post @relation("PostRelationTo", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@id([fromId, toId])
+}
+
+// ----- Fichiers attachés -----
+
+model PostAttachment {
+  id           Int      @id @default(autoincrement())
+  postId       Int
+  filename     String
+  originalName String?
+  mimeType     String?
+  sizeBytes    Int?
+  storagePath  String
+  label        String?
+  legacyId     Int?     @unique
+  createdAt    DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+}

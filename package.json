@@ -1,0 +1,42 @@
+{
+  "name": "help-selfizee-back",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "API Express + Prisma — back de help.selfizee.fr (auth via Keycloak).",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "prisma": "prisma",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "seed": "tsx prisma/seed.ts",
+    "docker:up": "docker compose up",
+    "docker:down": "docker compose down",
+    "docker:psql": "docker compose exec postgres psql -U help -d help_selfizee",
+    "docker:shell": "docker compose exec api sh"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "express": "^4.21.1",
+    "cors": "^2.8.5",
+    "jose": "^5.9.6",
+    "zod": "^3.23.8",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "@types/express": "^5.0.0",
+    "@types/cors": "^2.8.17",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}
