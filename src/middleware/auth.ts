@@ -3,9 +3,6 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 
 import { env, keycloakIssuer, keycloakJwksUrl } from "../config/env.js";
 
-// JWKS Keycloak — caché en mémoire, refetch automatique sur rotation des clés.
-const jwks = createRemoteJWKSet(new URL(keycloakJwksUrl));
-
 export type KcUser = {
   sub: string;            // ID utilisateur stable Keycloak
   email?: string;
@@ -23,6 +20,23 @@ declare global {
     }
   }
 }
+
+// JWKS Keycloak — caché en mémoire, refetch automatique sur rotation des clés.
+// En mode AUTH_DISABLED, on n'init pas le client JWKS (les vars Keycloak peuvent être absentes).
+const jwks = env.AUTH_DISABLED
+  ? null
+  : createRemoteJWKSet(new URL(keycloakJwksUrl));
+
+// User fictif injecté quand AUTH_DISABLED=true. authorKcSub utilisera ce sub
+// pour tous les posts créés en mode bypass — facile à filtrer plus tard.
+const BYPASS_USER: KcUser = {
+  sub: "auth-disabled-bypass",
+  email: "bypass@selfizee.local",
+  name: "Bypass User",
+  preferredUsername: "bypass",
+  roles: ["admin"],
+  raw: {} as JWTPayload,
+};
 
 function extractRoles(payload: JWTPayload): string[] {
   const roles: string[] = [];
@@ -44,6 +58,11 @@ export async function requireAuth(
   res: Response,
   next: NextFunction,
 ) {
+  if (env.AUTH_DISABLED) {
+    req.user = BYPASS_USER;
+    return next();
+  }
+
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) {
     return res.status(401).json({ error: "missing_bearer" });
@@ -51,7 +70,7 @@ export async function requireAuth(
   const token = header.slice("Bearer ".length);
 
   try {
-    const { payload } = await jwtVerify(token, jwks, {
+    const { payload } = await jwtVerify(token, jwks!, {
       issuer: keycloakIssuer,
       audience: env.KEYCLOAK_AUDIENCE,
     });
@@ -75,6 +94,7 @@ export async function requireAuth(
 
 export function requireRole(...roles: string[]) {
   return (req: Request, res: Response, next: NextFunction) => {
+    if (env.AUTH_DISABLED) return next();
     if (!req.user) return res.status(401).json({ error: "unauthorized" });
     const hasOne = roles.some((r) => req.user!.roles.includes(r));
     if (!hasOne) return res.status(403).json({ error: "forbidden", required: roles });

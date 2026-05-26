@@ -17,3 +17,10 @@ Thumbs.db
 
 # Prisma
 prisma/migrations/.DS_Store
+
+# Import one-shot — dumps SQL (peuvent contenir des données sensibles)
+dumps/
+*.sql
+# seed-prod.sql est généré à partir d'un import local et copié dans l'image runtime
+# pour seed au 1er boot Coolify. Commit nécessaire pour que Coolify le voie au build.
+!seed-prod.sql

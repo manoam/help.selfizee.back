@@ -34,8 +34,10 @@ RUN pnpm prune --prod
 # ---------- Stage 2 : runtime ----------
 FROM node:22-bookworm-slim AS runtime
 
+# postgresql-client fournit psql, nécessaire pour injecter seed-prod.sql au 1er boot
+# si la DB est vide. Pas de pg_dump/restore — juste psql client.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && apt-get install -y --no-install-recommends openssl ca-certificates postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
@@ -51,11 +53,16 @@ COPY --from=builder --chown=app:app /app/dist ./dist
 COPY --from=builder --chown=app:app /app/prisma ./prisma
 COPY --from=builder --chown=app:app /app/package.json ./package.json
 
+# Seed de production (généré via pg_dump local après l'import legacy).
+# Injecté au boot uniquement si la DB est vide — cf. docker/entrypoint.sh.
+COPY --chown=app:app seed-prod.sql ./seed-prod.sql
+COPY --chown=app:app docker/entrypoint.sh ./entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 USER app
 
 ENV NODE_ENV=production
 ENV PORT=3001
 EXPOSE 3001
 
-# Au boot : applique les migrations puis démarre le serveur
-CMD ["sh", "-c", "pnpm prisma migrate deploy && node dist/server.js"]
+CMD ["/app/entrypoint.sh"]

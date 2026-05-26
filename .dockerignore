@@ -1,0 +1,19 @@
+node_modules
+.pnpm-store
+dist
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+*.log
+.idea
+.vscode
+README.md
+
+# Dumps legacy MySQL — on ne veut PAS embarquer ces données brutes dans l'image.
+# Le seed Postgres généré (seed-prod.sql) est lui copié explicitement par le Dockerfile.
+dumps
+
+# Scripts d'import one-shot — pas nécessaires en runtime (deps tsx/jsdom/tiptap absentes).
+scripts
