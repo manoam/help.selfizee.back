@@ -21,6 +21,13 @@ prisma/migrations/.DS_Store
 # Import one-shot — dumps SQL (peuvent contenir des données sensibles)
 dumps/
 *.sql
+
+# Uploads utilisateurs (fichiers attachés aux posts)
+uploads/
+
 # seed-prod.sql est généré à partir d'un import local et copié dans l'image runtime
 # pour seed au 1er boot Coolify. Commit nécessaire pour que Coolify le voie au build.
 !seed-prod.sql
+
+# Les migrations Prisma sont du SQL versionné, doivent être commitées.
+!prisma/migrations/**/*.sql

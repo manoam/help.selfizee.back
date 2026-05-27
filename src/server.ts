@@ -9,6 +9,9 @@ import { authRouter } from "./routes/auth.js";
 import { postsRouter } from "./routes/posts.js";
 import { categoriesRouter } from "./routes/categories.js";
 import { tagsRouter } from "./routes/tags.js";
+import { attachmentsRouter } from "./routes/attachments.js";
+import { gammesBornesRouter, modelBornesRouter } from "./routes/bornes.js";
+import { typeProfilsRouter } from "./routes/type-profils.js";
 
 const app = express();
 
@@ -28,6 +31,10 @@ app.use("/auth", authRouter);
 app.use("/posts", postsRouter);
 app.use("/categories", categoriesRouter);
 app.use("/tags", tagsRouter);
+app.use("/attachments", attachmentsRouter);
+app.use("/gammes-bornes", gammesBornesRouter);
+app.use("/model-bornes", modelBornesRouter);
+app.use("/type-profils", typeProfilsRouter);
 
 app.use(errorHandler);
 

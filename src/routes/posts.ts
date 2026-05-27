@@ -20,6 +20,7 @@ postsRouter.get("/", async (_req, res, next) => {
         slug: true,
         resume: true,
         status: true,
+        isFavourite: true,
         publishedAt: true,
       },
     });
@@ -39,6 +40,8 @@ postsRouter.get("/:slug", async (req, res, next) => {
         },
         tags: { include: { tag: true } },
         attachments: true,
+        modelBornes: { include: { gammeBorne: true, modelBorne: true } },
+        typeProfils: { include: { typeProfil: true } },
       },
     });
     if (!post || post.status !== "PUBLISHED") {
@@ -63,9 +66,32 @@ postsRouter.get("/admin/all", requireAuth, async (_req, res, next) => {
         slug: true,
         resume: true,
         status: true,
+        isFavourite: true,
         publishedAt: true,
         updatedAt: true,
       },
+    });
+    res.json(posts);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Recherche compacte pour le picker "articles liés" du formulaire admin.
+postsRouter.get("/admin/searchable", requireAuth, async (req, res, next) => {
+  try {
+    const q = (req.query.q as string | undefined)?.trim();
+    const excludeId = req.query.exclude ? Number(req.query.exclude) : undefined;
+    const posts = await prisma.post.findMany({
+      where: {
+        ...(q
+          ? { titre: { contains: q, mode: "insensitive" as const } }
+          : {}),
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      take: 50,
+      orderBy: { updatedAt: "desc" },
+      select: { id: true, titre: true, slug: true, status: true },
     });
     res.json(posts);
   } catch (err) {
@@ -81,6 +107,9 @@ postsRouter.get("/by-id/:id", requireAuth, async (req, res, next) => {
         categories: true,
         tags: { include: { tag: true } },
         attachments: true,
+        modelBornes: { include: { gammeBorne: true, modelBorne: true } },
+        typeProfils: { include: { typeProfil: true } },
+        relatedTo: { include: { to: { select: { id: true, titre: true, slug: true } } } },
       },
     });
     if (!post) return res.status(404).json({ error: "not_found" });
@@ -90,24 +119,68 @@ postsRouter.get("/by-id/:id", requireAuth, async (req, res, next) => {
   }
 });
 
+const categorySchema = z.object({
+  categoryId: z.number(),
+  subCategoryId: z.number().optional().nullable(),
+  subSubCategoryId: z.number().optional().nullable(),
+});
+const modelBorneSchema = z.object({
+  gammeBorneId: z.number(),
+  modelBorneId: z.number().optional().nullable(),
+});
+
 const postSchema = z.object({
   titre: z.string().min(1),
   slug: z.string().optional(),
-  resume: z.string().optional(),
+  resume: z.string().optional().nullable(),
   contenu: z.any(),
-  contenuText: z.string().optional(),
+  contenuText: z.string().optional().nullable(),
   status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).default("DRAFT"),
+  isFavourite: z.boolean().optional(),
+  ordre: z.number().int().optional().nullable(),
+
+  // Champs CRM hérités (HTML brut).
+  descriptionProbleme: z.string().optional().nullable(),
+  question: z.string().optional().nullable(),
+  introClient: z.string().optional().nullable(),
+  noticeClient: z.string().optional().nullable(),
+  problemeClient: z.string().optional().nullable(),
+  introCallCenter: z.string().optional().nullable(),
+  noticeCallCenter: z.string().optional().nullable(),
+  problemeCallCenter: z.string().optional().nullable(),
+  introInterne: z.string().optional().nullable(),
+  problemeInterne: z.string().optional().nullable(),
+
+  // Relations.
   tagIds: z.array(z.number()).optional(),
-  categories: z
-    .array(
-      z.object({
-        categoryId: z.number(),
-        subCategoryId: z.number().optional(),
-        subSubCategoryId: z.number().optional(),
-      }),
-    )
-    .optional(),
+  categories: z.array(categorySchema).optional(),
+  modelBornes: z.array(modelBorneSchema).optional(),
+  typeProfilIds: z.array(z.number()).optional(),
+  relatedPostIds: z.array(z.number()).optional(),
 });
+
+// Construit le bloc `data` Prisma pour create/update, sans toucher aux relations.
+function buildScalarData(data: z.infer<typeof postSchema>) {
+  return {
+    titre: data.titre,
+    resume: data.resume ?? undefined,
+    contenu: data.contenu,
+    contenuText: data.contenuText ?? undefined,
+    status: data.status,
+    isFavourite: data.isFavourite ?? undefined,
+    ordre: data.ordre ?? undefined,
+    descriptionProbleme: data.descriptionProbleme ?? undefined,
+    question: data.question ?? undefined,
+    introClient: data.introClient ?? undefined,
+    noticeClient: data.noticeClient ?? undefined,
+    problemeClient: data.problemeClient ?? undefined,
+    introCallCenter: data.introCallCenter ?? undefined,
+    noticeCallCenter: data.noticeCallCenter ?? undefined,
+    problemeCallCenter: data.problemeCallCenter ?? undefined,
+    introInterne: data.introInterne ?? undefined,
+    problemeInterne: data.problemeInterne ?? undefined,
+  };
+}
 
 postsRouter.post("/", requireAuth, async (req, res, next) => {
   try {
@@ -116,18 +189,23 @@ postsRouter.post("/", requireAuth, async (req, res, next) => {
 
     const post = await prisma.post.create({
       data: {
-        titre: data.titre,
+        ...buildScalarData(data),
         slug,
-        resume: data.resume,
-        contenu: data.contenu,
-        contenuText: data.contenuText,
-        status: data.status,
         publishedAt: data.status === "PUBLISHED" ? new Date() : null,
         authorKcSub: req.user!.sub,
         authorName: req.user!.name ?? req.user!.preferredUsername ?? null,
-        categories: data.categories ? { create: data.categories } : undefined,
-        tags: data.tagIds
+        categories: data.categories?.length ? { create: data.categories } : undefined,
+        tags: data.tagIds?.length
           ? { create: data.tagIds.map((tagId) => ({ tagId })) }
+          : undefined,
+        modelBornes: data.modelBornes?.length
+          ? { create: data.modelBornes }
+          : undefined,
+        typeProfils: data.typeProfilIds?.length
+          ? { create: data.typeProfilIds.map((typeProfilId) => ({ typeProfilId })) }
+          : undefined,
+        relatedTo: data.relatedPostIds?.length
+          ? { create: data.relatedPostIds.map((toId) => ({ toId })) }
           : undefined,
       },
     });
@@ -149,20 +227,64 @@ postsRouter.put("/:id", requireAuth, async (req, res, next) => {
       if (data.tagIds) {
         await tx.postTag.deleteMany({ where: { postId: id } });
       }
+      if (data.modelBornes) {
+        await tx.postModelBorne.deleteMany({ where: { postId: id } });
+      }
+      if (data.typeProfilIds) {
+        await tx.postTypeProfil.deleteMany({ where: { postId: id } });
+      }
+      if (data.relatedPostIds) {
+        await tx.postRelation.deleteMany({ where: { fromId: id } });
+      }
       return tx.post.update({
         where: { id },
         data: {
-          titre: data.titre,
-          slug: data.slug,
-          resume: data.resume,
-          contenu: data.contenu,
-          contenuText: data.contenuText,
-          status: data.status,
+          ...(data.titre !== undefined ? { titre: data.titre } : {}),
+          ...(data.slug !== undefined ? { slug: data.slug } : {}),
+          ...(data.resume !== undefined ? { resume: data.resume } : {}),
+          ...(data.contenu !== undefined ? { contenu: data.contenu } : {}),
+          ...(data.contenuText !== undefined ? { contenuText: data.contenuText } : {}),
+          ...(data.status !== undefined ? { status: data.status } : {}),
+          ...(data.isFavourite !== undefined ? { isFavourite: data.isFavourite } : {}),
+          ...(data.ordre !== undefined ? { ordre: data.ordre } : {}),
+          ...(data.descriptionProbleme !== undefined
+            ? { descriptionProbleme: data.descriptionProbleme }
+            : {}),
+          ...(data.question !== undefined ? { question: data.question } : {}),
+          ...(data.introClient !== undefined ? { introClient: data.introClient } : {}),
+          ...(data.noticeClient !== undefined ? { noticeClient: data.noticeClient } : {}),
+          ...(data.problemeClient !== undefined
+            ? { problemeClient: data.problemeClient }
+            : {}),
+          ...(data.introCallCenter !== undefined
+            ? { introCallCenter: data.introCallCenter }
+            : {}),
+          ...(data.noticeCallCenter !== undefined
+            ? { noticeCallCenter: data.noticeCallCenter }
+            : {}),
+          ...(data.problemeCallCenter !== undefined
+            ? { problemeCallCenter: data.problemeCallCenter }
+            : {}),
+          ...(data.introInterne !== undefined ? { introInterne: data.introInterne } : {}),
+          ...(data.problemeInterne !== undefined
+            ? { problemeInterne: data.problemeInterne }
+            : {}),
           publishedAt:
             data.status === "PUBLISHED" ? new Date() : data.status ? null : undefined,
-          categories: data.categories ? { create: data.categories } : undefined,
-          tags: data.tagIds
+          categories: data.categories?.length
+            ? { create: data.categories }
+            : undefined,
+          tags: data.tagIds?.length
             ? { create: data.tagIds.map((tagId) => ({ tagId })) }
+            : undefined,
+          modelBornes: data.modelBornes?.length
+            ? { create: data.modelBornes }
+            : undefined,
+          typeProfils: data.typeProfilIds?.length
+            ? { create: data.typeProfilIds.map((typeProfilId) => ({ typeProfilId })) }
+            : undefined,
+          relatedTo: data.relatedPostIds?.length
+            ? { create: data.relatedPostIds.map((toId) => ({ toId })) }
             : undefined,
         },
       });

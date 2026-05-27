@@ -73,13 +73,29 @@ model Post {
   titre       String
   slug        String     @unique
   resume      String?
+  // `contenu` (JSON TipTap) correspond à l'ancien `contenu` (= notice interne) du CRM.
+  // Les 9 textareas des vues client/callcenter/interne sont stockés en HTML brut (champs ci-dessous).
   contenu     Json
   contenuText String?
   status      PostStatus @default(DRAFT)
+  isFavourite Boolean    @default(false)
+  ordre       Int?
   legacyId    Int?       @unique
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   publishedAt DateTime?
+
+  // Champs hérités du CRM, stockés en HTML brut. Édition future possible en TipTap.
+  descriptionProbleme String?
+  question            String?
+  introClient         String?
+  noticeClient        String?
+  problemeClient      String?
+  introCallCenter     String?
+  noticeCallCenter    String?
+  problemeCallCenter  String?
+  introInterne        String?
+  problemeInterne     String?
 
   // Identité de l'auteur — capturée depuis le token Keycloak au moment de la création.
   // Le `sub` Keycloak est stable et opaque ; `authorName` est dénormalisé pour l'affichage.
@@ -89,12 +105,15 @@ model Post {
   categories     PostCategory[]
   tags           PostTag[]
   attachments    PostAttachment[]
+  modelBornes    PostModelBorne[]
+  typeProfils    PostTypeProfil[]
   relatedTo      PostRelation[]  @relation("PostRelationFrom")
   relatedFrom    PostRelation[]  @relation("PostRelationTo")
 
   @@index([status])
   @@index([publishedAt])
   @@index([authorKcSub])
+  @@index([isFavourite])
 }
 
 enum PostStatus {
@@ -162,10 +181,73 @@ model PostAttachment {
   sizeBytes    Int?
   storagePath  String
   label        String?
+  description  String?
   legacyId     Int?     @unique
   createdAt    DateTime @default(now())
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([postId])
+}
+
+// ----- Gammes et modèles de bornes (matériel physique Selfizee) -----
+
+model GammeBorne {
+  id        Int      @id @default(autoincrement())
+  nom       String   @db.VarChar(255)
+  slug      String   @unique
+  legacyId  Int?     @unique
+  createdAt DateTime @default(now())
+
+  modelBornes ModelBorne[]
+  posts       PostModelBorne[]
+}
+
+model ModelBorne {
+  id        Int      @id @default(autoincrement())
+  nom       String   @db.VarChar(255)
+  version   String?  @db.VarChar(64)
+  legacyId  Int?     @unique
+  createdAt DateTime @default(now())
+
+  gammeBorneId Int
+  gammeBorne   GammeBorne       @relation(fields: [gammeBorneId], references: [id], onDelete: Cascade)
+  posts        PostModelBorne[]
+
+  @@index([gammeBorneId])
+}
+
+model PostModelBorne {
+  id Int @id @default(autoincrement())
+
+  postId       Int
+  post         Post        @relation(fields: [postId], references: [id], onDelete: Cascade)
+  gammeBorneId Int
+  gammeBorne   GammeBorne  @relation(fields: [gammeBorneId], references: [id], onDelete: Restrict)
+  modelBorneId Int?
+  modelBorne   ModelBorne? @relation(fields: [modelBorneId], references: [id], onDelete: SetNull)
+
+  @@index([postId])
+  @@index([gammeBorneId])
+}
+
+// ----- Niveaux d'accès (profils utilisateurs) -----
+
+model TypeProfil {
+  id        Int      @id @default(autoincrement())
+  nom       String   @db.VarChar(255)
+  slug      String   @unique
+  legacyId  Int?     @unique
+  createdAt DateTime @default(now())
+
+  posts PostTypeProfil[]
+}
+
+model PostTypeProfil {
+  postId       Int
+  typeProfilId Int
+  post         Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  typeProfil   TypeProfil @relation(fields: [typeProfilId], references: [id], onDelete: Cascade)
+
+  @@id([postId, typeProfilId])
 }
