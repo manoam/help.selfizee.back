@@ -11,7 +11,14 @@ import { requireAuth } from "../middleware/auth.js";
 // en prod Coolify, à mapper sur un volume persistant.
 const UPLOAD_DIR = process.env.UPLOAD_DIR || "/app/uploads";
 
-await fs.mkdir(UPLOAD_DIR, { recursive: true });
+// Création best-effort au boot. Si elle échoue (permission, volume read-only),
+// on log mais on n'empêche pas le serveur de démarrer — les uploads se feront
+// peut-être plus tard une fois le volume Coolify monté correctement.
+try {
+  await fs.mkdir(UPLOAD_DIR, { recursive: true });
+} catch (err) {
+  console.warn(`[attachments] cannot create ${UPLOAD_DIR}:`, err);
+}
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),

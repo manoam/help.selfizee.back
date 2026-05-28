@@ -59,6 +59,10 @@ COPY --chown=app:app seed-prod.sql ./seed-prod.sql
 COPY --chown=app:app docker/entrypoint.sh ./entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
+# Crée le dossier d'uploads avec les bons droits avant de passer en user non-root.
+# En prod Coolify, ce chemin sera monté sur un volume persistant.
+RUN mkdir -p /app/uploads && chown -R app:app /app/uploads
+
 USER app
 
 ENV NODE_ENV=production
