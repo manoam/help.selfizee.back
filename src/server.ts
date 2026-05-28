@@ -16,9 +16,21 @@ import { typeProfilsRouter } from "./routes/type-profils.js";
 const app = express();
 
 app.use(express.json({ limit: "10mb" }));
+
+// CORS — autorise les origines listées dans CORS_ORIGINS (CSV).
+// On utilise une fonction callback pour logguer les rejets, ce qui aide à
+// debugger les soucis de whitelist en prod (slash final, schéma, etc.).
+const allowedOrigins = new Set(env.CORS_ORIGINS);
+console.log(`[cors] allowed origins: ${[...allowedOrigins].join(", ") || "(none)"}`);
 app.use(
   cors({
-    origin: env.CORS_ORIGINS,
+    origin: (origin, callback) => {
+      // Requêtes sans Origin (curl, server-to-server) -> autorisées.
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.has(origin)) return callback(null, true);
+      console.warn(`[cors] rejected origin: ${origin}`);
+      return callback(null, false);
+    },
     credentials: true,
   }),
 );
