@@ -9,10 +9,33 @@ export const postsRouter = Router();
 
 // ----- Public -----
 
-postsRouter.get("/", async (_req, res, next) => {
+postsRouter.get("/", async (req, res, next) => {
   try {
+    const categoryId = req.query.categoryId
+      ? Number(req.query.categoryId)
+      : undefined;
+    const subCategoryId = req.query.subCategoryId
+      ? Number(req.query.subCategoryId)
+      : undefined;
+    const subSubCategoryId = req.query.subSubCategoryId
+      ? Number(req.query.subSubCategoryId)
+      : undefined;
+
+    const categoryFilter =
+      categoryId || subCategoryId || subSubCategoryId
+        ? {
+            categories: {
+              some: {
+                ...(categoryId ? { categoryId } : {}),
+                ...(subCategoryId ? { subCategoryId } : {}),
+                ...(subSubCategoryId ? { subSubCategoryId } : {}),
+              },
+            },
+          }
+        : {};
+
     const posts = await prisma.post.findMany({
-      where: { status: "PUBLISHED" },
+      where: { status: "PUBLISHED", ...categoryFilter },
       orderBy: { publishedAt: "desc" },
       select: {
         id: true,

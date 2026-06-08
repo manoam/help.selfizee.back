@@ -37,6 +37,34 @@ categoriesRouter.get("/", async (req, res, next) => {
   }
 });
 
+// Détail d'une catégorie par slug, avec sous-catégories et sous-sous-catégories
+// incluses + count des posts par sous-sous-cat (pour la page CategoryPage publique).
+categoriesRouter.get("/by-slug/:slug", async (req, res, next) => {
+  try {
+    const cat = await prisma.category.findUnique({
+      where: { slug: req.params.slug },
+      include: {
+        subCategories: {
+          orderBy: { ordre: "asc" },
+          include: {
+            subSubCategories: {
+              orderBy: { ordre: "asc" },
+              include: {
+                _count: { select: { posts: true } },
+              },
+            },
+            _count: { select: { posts: true } },
+          },
+        },
+      },
+    });
+    if (!cat) return res.status(404).json({ error: "not_found" });
+    res.json(cat);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Sous-catégories à plat, avec leur categoryId — pour cascade côté admin.
 categoriesRouter.get("/sub", async (_req, res, next) => {
   try {
