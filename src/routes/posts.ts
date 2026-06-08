@@ -20,6 +20,8 @@ postsRouter.get("/", async (req, res, next) => {
     const subSubCategoryId = req.query.subSubCategoryId
       ? Number(req.query.subSubCategoryId)
       : undefined;
+    const tagId = req.query.tagId ? Number(req.query.tagId) : undefined;
+    const favourite = req.query.favourite === "1";
 
     const categoryFilter =
       categoryId || subCategoryId || subSubCategoryId
@@ -34,9 +36,18 @@ postsRouter.get("/", async (req, res, next) => {
           }
         : {};
 
+    const tagFilter = tagId
+      ? { tags: { some: { tagId } } }
+      : {};
+
     const posts = await prisma.post.findMany({
-      where: { status: "PUBLISHED", ...categoryFilter },
-      orderBy: { publishedAt: "desc" },
+      where: {
+        status: "PUBLISHED",
+        ...(favourite ? { isFavourite: true } : {}),
+        ...categoryFilter,
+        ...tagFilter,
+      },
+      orderBy: [{ ordre: "asc" }, { publishedAt: "desc" }],
       select: {
         id: true,
         titre: true,
@@ -322,6 +333,24 @@ postsRouter.delete("/:id", requireAuth, async (req, res, next) => {
   try {
     await prisma.post.delete({ where: { id: Number(req.params.id) } });
     res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Réordonne une liste de posts (drag-drop côté admin).
+// Payload : { ids: [1, 5, 3, ...] } → applique ordre 0..N-1 en transaction.
+const reorderSchema = z.object({ ids: z.array(z.number().int()) });
+
+postsRouter.post("/reorder", requireAuth, async (req, res, next) => {
+  try {
+    const { ids } = reorderSchema.parse(req.body);
+    await prisma.$transaction(
+      ids.map((id, idx) =>
+        prisma.post.update({ where: { id }, data: { ordre: idx } }),
+      ),
+    );
+    res.json({ updated: ids.length });
   } catch (err) {
     next(err);
   }

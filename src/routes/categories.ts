@@ -78,6 +78,40 @@ categoriesRouter.get("/sub", async (_req, res, next) => {
   }
 });
 
+// Une sous-catégorie par slug (avec sa cat parente pour breadcrumb).
+categoriesRouter.get("/sub/by-slug/:slug", async (req, res, next) => {
+  try {
+    const sub = await prisma.subCategory.findFirst({
+      where: { slug: req.params.slug },
+      include: { category: { select: { id: true, nom: true, slug: true } } },
+    });
+    if (!sub) return res.status(404).json({ error: "not_found" });
+    res.json(sub);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Une sous-sous-catégorie par slug.
+categoriesRouter.get("/sub-sub/by-slug/:slug", async (req, res, next) => {
+  try {
+    const ssc = await prisma.subSubCategory.findFirst({
+      where: { slug: req.params.slug },
+      include: {
+        subCategory: {
+          include: {
+            category: { select: { id: true, nom: true, slug: true } },
+          },
+        },
+      },
+    });
+    if (!ssc) return res.status(404).json({ error: "not_found" });
+    res.json(ssc);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Sous-sous-catégories à plat, avec leur subCategoryId.
 categoriesRouter.get("/sub-sub", async (_req, res, next) => {
   try {

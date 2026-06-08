@@ -107,6 +107,7 @@ model Post {
   attachments    PostAttachment[]
   modelBornes    PostModelBorne[]
   typeProfils    PostTypeProfil[]
+  votes          Vote[]
   relatedTo      PostRelation[]  @relation("PostRelationFrom")
   relatedFrom    PostRelation[]  @relation("PostRelationTo")
 
@@ -250,4 +251,38 @@ model PostTypeProfil {
   typeProfil   TypeProfil @relation(fields: [typeProfilId], references: [id], onDelete: Cascade)
 
   @@id([postId, typeProfilId])
+}
+
+// ----- Votes utilisateurs (3 emojis : triste / neutre / heureux), repris du CRM. -----
+
+enum VoteValue {
+  SAD
+  NEUTRAL
+  HAPPY
+}
+
+model Vote {
+  id          Int       @id @default(autoincrement())
+  postId      Int
+  voterKcSub  String    // sub du JWT Keycloak (ou "auth-disabled-bypass")
+  value       VoteValue
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  // Un seul vote par (post, voter). Le re-vote update au lieu de créer.
+  @@unique([postId, voterKcSub])
+  @@index([postId])
+}
+
+// ----- Historique des recherches (utilisé pour analytics + suggestions). -----
+
+model AssistanceRecherche {
+  id         Int      @id @default(autoincrement())
+  text       String
+  voterKcSub String?  // null si recherche anonyme
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
 }

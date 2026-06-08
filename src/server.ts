@@ -12,6 +12,9 @@ import { tagsRouter } from "./routes/tags.js";
 import { attachmentsRouter } from "./routes/attachments.js";
 import { gammesBornesRouter, modelBornesRouter } from "./routes/bornes.js";
 import { typeProfilsRouter } from "./routes/type-profils.js";
+import { searchRouter } from "./routes/search.js";
+import { votesRouter } from "./routes/votes.js";
+import { uploadRouter } from "./routes/upload.js";
 
 const app = express();
 
@@ -35,6 +38,11 @@ app.use(
   }),
 );
 
+// Sert les fichiers uploadés (images richtext, attachments preview en lecture).
+// Lecture publique car les fichiers sont déjà accessibles via /attachments/:id/download.
+const UPLOAD_DIR = process.env.UPLOAD_DIR || "/app/uploads";
+app.use("/uploads", express.static(UPLOAD_DIR));
+
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", env: env.NODE_ENV });
 });
@@ -47,6 +55,9 @@ app.use("/attachments", attachmentsRouter);
 app.use("/gammes-bornes", gammesBornesRouter);
 app.use("/model-bornes", modelBornesRouter);
 app.use("/type-profils", typeProfilsRouter);
+app.use("/search", searchRouter);
+app.use("/votes", votesRouter);
+app.use("/upload", uploadRouter);
 
 app.use(errorHandler);
 
