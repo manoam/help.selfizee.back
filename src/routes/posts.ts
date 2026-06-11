@@ -4,6 +4,29 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
 import { slugify } from "../lib/slugify.js";
+import { sanitizeHtml } from "../lib/sanitize.js";
+
+const HTML_FIELDS = [
+  "descriptionProbleme",
+  "question",
+  "introClient",
+  "noticeClient",
+  "problemeClient",
+  "introCallCenter",
+  "noticeCallCenter",
+  "problemeCallCenter",
+  "introInterne",
+  "problemeInterne",
+] as const;
+
+function sanitizeHtmlFields(data: Record<string, unknown>) {
+  for (const k of HTML_FIELDS) {
+    if (typeof data[k] === "string") {
+      data[k] = sanitizeHtml(data[k] as string);
+    }
+  }
+  return data;
+}
 
 export const postsRouter = Router();
 
@@ -22,6 +45,9 @@ postsRouter.get("/", async (req, res, next) => {
       : undefined;
     const tagId = req.query.tagId ? Number(req.query.tagId) : undefined;
     const favourite = req.query.favourite === "1";
+    // directOnly=1 : posts attachés DIRECTEMENT à categoryId (sans sous-cat).
+    // Évite la duplication entre la nav par sous-cat et la liste générale.
+    const directOnly = req.query.directOnly === "1";
 
     const categoryFilter =
       categoryId || subCategoryId || subSubCategoryId
@@ -31,6 +57,9 @@ postsRouter.get("/", async (req, res, next) => {
                 ...(categoryId ? { categoryId } : {}),
                 ...(subCategoryId ? { subCategoryId } : {}),
                 ...(subSubCategoryId ? { subSubCategoryId } : {}),
+                ...(directOnly && categoryId
+                  ? { subCategoryId: null, subSubCategoryId: null }
+                  : {}),
               },
             },
           }
@@ -47,7 +76,11 @@ postsRouter.get("/", async (req, res, next) => {
         ...categoryFilter,
         ...tagFilter,
       },
-      orderBy: [{ ordre: "asc" }, { publishedAt: "desc" }],
+      orderBy: [
+        { ordre: { sort: "asc", nulls: "last" } },
+        { publishedAt: "desc" },
+      ],
+      take: 200,
       select: {
         id: true,
         titre: true,
@@ -68,14 +101,62 @@ postsRouter.get("/:slug", async (req, res, next) => {
   try {
     const post = await prisma.post.findUnique({
       where: { slug: req.params.slug },
-      include: {
+      // Select restrictif : on n'expose ni authorKcSub (sub Keycloak interne)
+      // ni storagePath (chemin disque). modelBornes et typeProfils ne sont pas
+      // utilisés par PostPage -> retirés pour la perf.
+      select: {
+        id: true,
+        titre: true,
+        slug: true,
+        resume: true,
+        contenu: true,
+        contenuText: true,
+        status: true,
+        isFavourite: true,
+        ordre: true,
+        publishedAt: true,
+        authorName: true,
+        descriptionProbleme: true,
+        question: true,
+        introClient: true,
+        noticeClient: true,
+        problemeClient: true,
+        introCallCenter: true,
+        noticeCallCenter: true,
+        problemeCallCenter: true,
+        introInterne: true,
+        problemeInterne: true,
         categories: {
-          include: { category: true, subCategory: true, subSubCategory: true },
+          select: {
+            id: true,
+            categoryId: true,
+            subCategoryId: true,
+            subSubCategoryId: true,
+            category: { select: { id: true, nom: true, slug: true } },
+            subCategory: { select: { id: true, nom: true, slug: true } },
+            subSubCategory: { select: { id: true, nom: true, slug: true } },
+          },
         },
-        tags: { include: { tag: true } },
-        attachments: true,
-        modelBornes: { include: { gammeBorne: true, modelBorne: true } },
-        typeProfils: { include: { typeProfil: true } },
+        tags: {
+          select: {
+            tag: { select: { id: true, name: true, slug: true } },
+          },
+        },
+        attachments: {
+          select: {
+            id: true,
+            originalName: true,
+            mimeType: true,
+            sizeBytes: true,
+            label: true,
+            description: true,
+          },
+        },
+        relatedTo: {
+          select: {
+            to: { select: { id: true, titre: true, slug: true } },
+          },
+        },
       },
     });
     if (!post || post.status !== "PUBLISHED") {
@@ -219,6 +300,7 @@ function buildScalarData(data: z.infer<typeof postSchema>) {
 postsRouter.post("/", requireAuth, async (req, res, next) => {
   try {
     const data = postSchema.parse(req.body);
+    sanitizeHtmlFields(data as Record<string, unknown>);
     const slug = data.slug ?? slugify(data.titre);
 
     const post = await prisma.post.create({
@@ -252,7 +334,31 @@ postsRouter.post("/", requireAuth, async (req, res, next) => {
 postsRouter.put("/:id", requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: "bad_id" });
+    }
     const data = postSchema.partial().parse(req.body);
+    sanitizeHtmlFields(data as Record<string, unknown>);
+
+    // Pour ne pas écraser publishedAt à chaque save, on lit l'état actuel
+    // et on ne set publishedAt = now() qu'au moment d'une transition réelle
+    // DRAFT/ARCHIVED -> PUBLISHED.
+    const current =
+      data.status !== undefined
+        ? await prisma.post.findUnique({
+            where: { id },
+            select: { status: true, publishedAt: true },
+          })
+        : null;
+    let publishedAtUpdate: Date | null | undefined;
+    if (data.status === "PUBLISHED") {
+      publishedAtUpdate =
+        current && current.status !== "PUBLISHED" ? new Date() : undefined;
+    } else if (data.status === "DRAFT" || data.status === "ARCHIVED") {
+      publishedAtUpdate = null;
+    } else {
+      publishedAtUpdate = undefined;
+    }
 
     const post = await prisma.$transaction(async (tx) => {
       if (data.categories) {
@@ -303,8 +409,7 @@ postsRouter.put("/:id", requireAuth, async (req, res, next) => {
           ...(data.problemeInterne !== undefined
             ? { problemeInterne: data.problemeInterne }
             : {}),
-          publishedAt:
-            data.status === "PUBLISHED" ? new Date() : data.status ? null : undefined,
+          publishedAt: publishedAtUpdate,
           categories: data.categories?.length
             ? { create: data.categories }
             : undefined,
@@ -339,16 +444,25 @@ postsRouter.delete("/:id", requireAuth, async (req, res, next) => {
 });
 
 // Réordonne une liste de posts (drag-drop côté admin).
-// Payload : { ids: [1, 5, 3, ...] } → applique ordre 0..N-1 en transaction.
-const reorderSchema = z.object({ ids: z.array(z.number().int()) });
+// Payload : { ids: [1, 5, 3, ...] } → applique ordre 0..N-1 en UN SEUL UPDATE.
+// Beaucoup plus rapide que N updates en transaction (O(1) round-trip vs O(N)).
+const reorderSchema = z.object({
+  ids: z.array(z.number().int().positive()).min(1).max(2000),
+});
 
 postsRouter.post("/reorder", requireAuth, async (req, res, next) => {
   try {
     const { ids } = reorderSchema.parse(req.body);
-    await prisma.$transaction(
-      ids.map((id, idx) =>
-        prisma.post.update({ where: { id }, data: { ordre: idx } }),
-      ),
+    // UPDATE en 1 seul round-trip avec UNNEST. Bien plus rapide que
+    // N updates en transaction Prisma (O(1) vs O(N) round-trips réseau).
+    const ords = ids.map((_, i) => i);
+    await prisma.$executeRawUnsafe(
+      `UPDATE "Post"
+       SET ordre = c.ord
+       FROM (SELECT * FROM UNNEST($1::int[], $2::int[]) AS t(id, ord)) AS c
+       WHERE "Post".id = c.id`,
+      ids,
+      ords,
     );
     res.json({ updated: ids.length });
   } catch (err) {

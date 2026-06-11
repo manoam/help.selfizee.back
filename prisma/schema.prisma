@@ -158,6 +158,7 @@ model PostTag {
   tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([postId, tagId])
+  @@index([tagId])
 }
 
 // ----- Posts liés -----
@@ -169,6 +170,7 @@ model PostRelation {
   to     Post @relation("PostRelationTo", fields: [toId], references: [id], onDelete: Cascade)
 
   @@id([fromId, toId])
+  @@index([toId])
 }
 
 // ----- Fichiers attachés -----
@@ -251,6 +253,7 @@ model PostTypeProfil {
   typeProfil   TypeProfil @relation(fields: [typeProfilId], references: [id], onDelete: Cascade)
 
   @@id([postId, typeProfilId])
+  @@index([typeProfilId])
 }
 
 // ----- Votes utilisateurs (3 emojis : triste / neutre / heureux), repris du CRM. -----
@@ -274,6 +277,8 @@ model Vote {
   // Un seul vote par (post, voter). Le re-vote update au lieu de créer.
   @@unique([postId, voterKcSub])
   @@index([postId])
+  // Index composé pour groupBy(value) where postId.
+  @@index([postId, value])
 }
 
 // ----- Historique des recherches (utilisé pour analytics + suggestions). -----

@@ -1,7 +1,8 @@
 import { Router } from "express";
 import multer from "multer";
 import path from "node:path";
-import fs from "node:fs/promises";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 
 import { prisma } from "../lib/prisma.js";
@@ -11,11 +12,10 @@ import { requireAuth } from "../middleware/auth.js";
 // en prod Coolify, à mapper sur un volume persistant.
 const UPLOAD_DIR = process.env.UPLOAD_DIR || "/app/uploads";
 
-// Création best-effort au boot. Si elle échoue (permission, volume read-only),
-// on log mais on n'empêche pas le serveur de démarrer — les uploads se feront
-// peut-être plus tard une fois le volume Coolify monté correctement.
+// Création synchrone au load (rapide, pas de top-level await qui bloque
+// l'évaluation du module ESM).
 try {
-  await fs.mkdir(UPLOAD_DIR, { recursive: true });
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 } catch (err) {
   console.warn(`[attachments] cannot create ${UPLOAD_DIR}:`, err);
 }
@@ -23,7 +23,9 @@ try {
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
+    // path.basename pour défense en profondeur (sanitize CR/LF dans le nom).
+    const safeName = path.basename(file.originalname);
+    const ext = path.extname(safeName).toLowerCase();
     cb(null, `${randomUUID()}${ext}`);
   },
 });
@@ -32,6 +34,11 @@ const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB max par fichier
 });
+
+function parseId(raw: unknown): number | null {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 export const attachmentsRouter = Router();
 
@@ -43,7 +50,8 @@ attachmentsRouter.post(
   upload.single("file"),
   async (req, res, next) => {
     try {
-      const postId = Number(req.params.postId);
+      const postId = parseId(req.params.postId);
+      if (postId == null) return res.status(400).json({ error: "bad_id" });
       if (!req.file) {
         return res.status(400).json({ error: "no_file" });
       }
@@ -66,10 +74,35 @@ attachmentsRouter.post(
   },
 );
 
+// Liste les attachments d'un post (route légère, sans charger tout le post).
+attachmentsRouter.get("/by-post/:postId", requireAuth, async (req, res, next) => {
+  try {
+    const postId = parseId(req.params.postId);
+    if (postId == null) return res.status(400).json({ error: "bad_id" });
+    const rows = await prisma.postAttachment.findMany({
+      where: { postId },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        filename: true,
+        originalName: true,
+        mimeType: true,
+        sizeBytes: true,
+        label: true,
+        description: true,
+      },
+    });
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Update meta (label, description) d'un attachment sans re-uploader.
 attachmentsRouter.put("/:id", requireAuth, async (req, res, next) => {
   try {
-    const id = Number(req.params.id);
+    const id = parseId(req.params.id);
+    if (id == null) return res.status(400).json({ error: "bad_id" });
     const attachment = await prisma.postAttachment.update({
       where: { id },
       data: {
@@ -83,13 +116,17 @@ attachmentsRouter.put("/:id", requireAuth, async (req, res, next) => {
   }
 });
 
-// Stream le fichier (admin uniquement pour l'instant — on autorisera le public plus tard).
+// Stream le fichier (authentifié — pour le download public utiliser /public-attachments).
 attachmentsRouter.get("/:id/download", requireAuth, async (req, res, next) => {
   try {
-    const id = Number(req.params.id);
+    const id = parseId(req.params.id);
+    if (id == null) return res.status(400).json({ error: "bad_id" });
     const att = await prisma.postAttachment.findUnique({ where: { id } });
     if (!att) return res.status(404).json({ error: "not_found" });
-    res.download(att.storagePath, att.originalName ?? att.filename);
+    res.download(
+      att.storagePath,
+      path.basename(att.originalName ?? att.filename),
+    );
   } catch (err) {
     next(err);
   }
@@ -97,13 +134,14 @@ attachmentsRouter.get("/:id/download", requireAuth, async (req, res, next) => {
 
 attachmentsRouter.delete("/:id", requireAuth, async (req, res, next) => {
   try {
-    const id = Number(req.params.id);
+    const id = parseId(req.params.id);
+    if (id == null) return res.status(400).json({ error: "bad_id" });
     const att = await prisma.postAttachment.findUnique({ where: { id } });
     if (!att) return res.status(404).json({ error: "not_found" });
     await prisma.postAttachment.delete({ where: { id } });
     // Best-effort sur le file system : si le fichier est déjà absent, on ignore.
     try {
-      await fs.unlink(att.storagePath);
+      await fsp.unlink(att.storagePath);
     } catch {
       // ignore
     }
