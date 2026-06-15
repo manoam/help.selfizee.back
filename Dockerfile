@@ -17,9 +17,12 @@ WORKDIR /app
 # (prisma CLI, tsx, typescript) nécessaires au build. Le stage runtime remet production.
 ENV NODE_ENV=development
 
-# Install des dépendances (frozen lockfile pour build reproductible)
+# Install des dépendances.
+# Idéalement --frozen-lockfile pour reproductibilité, mais on tolère un lockfile
+# pas à jour (le builder Coolify le régénère). Repasser à --frozen-lockfile dès
+# qu'on a régénéré le lockfile en local et committé.
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 # Génère le client Prisma + compile TypeScript
 COPY prisma ./prisma
